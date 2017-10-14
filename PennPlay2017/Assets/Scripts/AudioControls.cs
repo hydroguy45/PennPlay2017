@@ -3,15 +3,31 @@ using System.Collections;
 
 public class AudioControls : MonoBehaviour {
 
+	public Bullet bullet;
 	// Use this for initialization
 	private AudioSource source;
 	private int maxFreq = 44100;
-	private int timeLength = 5;
+	private int timeLength = 1;
 	//MAY BE AN ISSUE FOR OTHER COMPUTERS!!!
 	private string mic;
-	public float refreshTime = 1f;
+	public float refreshTime = 0.5f;
 	private float timeElapsedSinceUpdate = 0f;
+	public float RmsValue;
+	public float DbValue;
+	public float PitchValue;
+
+	private const int QSamples = 1024;
+	private const float RefValue = 0.1f;
+	private const float Threshold = 0.02f;
+
+	float[] _samples;
+	private float[] _spectrum;
+	private float _fSample;
+
 	void Start () {
+		_samples = new float[QSamples];
+		_spectrum = new float[QSamples];
+		_fSample = AudioSettings.outputSampleRate;
 		mic = Microphone.devices[0];//I'm assuming it will be this one
 		source = GetComponent<AudioSource> ();
 		/*for (int i = 0; i < Microphone.devices.Length; i++) {
@@ -19,7 +35,7 @@ public class AudioControls : MonoBehaviour {
 		}*/
 		source.clip = Microphone.Start (mic, true, timeLength, maxFreq); 
 		//GetComponent<AudioSource>().loop = true;
-		source.mute = true;
+		//source.mute = true;
 		while(!(Microphone.GetPosition(mic) > 0)){}//Busy wait
 		source.Play();
 	}
@@ -30,6 +46,7 @@ public class AudioControls : MonoBehaviour {
 		if (timeElapsedSinceUpdate >= refreshTime) {
 			StopMic ();
 			ProcessMicData();
+			fireBullet ();
 			StartMic ();
 			timeElapsedSinceUpdate = 0f;
 		}
@@ -39,7 +56,10 @@ public class AudioControls : MonoBehaviour {
 				Debug.Log ("Mic is Off");
 			}*/
 	}
-
+	void fireBullet(){
+		Instantiate (bullet);
+		bullet.xPos = positionToUse;
+	}
 	void StopMic(){
 		source.Stop ();
 		Microphone.End (mic);
@@ -50,23 +70,44 @@ public class AudioControls : MonoBehaviour {
 		while(!(Microphone.GetPosition(mic) > 0)){}//Busy wait
 		source.Play(); 
 	}
+	private float positionToUse = 0;
+	void ProcessMicData()
+	{
+		GetComponent<AudioSource>().GetOutputData(_samples, 0);
+		float sum = 0;
 
-	void ProcessMicData(){
-		int numberOfBins = 1024;
-		float[] spectrum = new float[numberOfBins];
-		AudioListener.GetSpectrumData(spectrum, 1, FFTWindow.Hamming);
-		int maxFreq = 1; //Nyquist freq is a thing
-		for (int i = 1; i < spectrum.Length - 1; i++)
+		for (int i = 0; i < QSamples; i++)
 		{
-			if (spectrum [i] > spectrum [maxFreq]) {
-				maxFreq = i;
-			}
-			Debug.DrawLine(new Vector3(i - 1, spectrum[i] + 10, 0), new Vector3(i, spectrum[i + 1] + 10, 0), Color.red, Time.deltaTime, false);
-			Debug.DrawLine(new Vector3(i - 1, Mathf.Log(spectrum[i - 1]) + 10, 2), new Vector3(i, Mathf.Log(spectrum[i]) + 10, 2), Color.cyan);
-			Debug.DrawLine(new Vector3(Mathf.Log(i - 1), spectrum[i - 1] - 10, 1), new Vector3(Mathf.Log(i), spectrum[i] - 10, 1), Color.green);
-			//Cyan seems to be what to use
-			Debug.DrawLine(new Vector3(Mathf.Log(i - 1), Mathf.Log(spectrum[i - 1]), 3), new Vector3(Mathf.Log(i), Mathf.Log(spectrum[i]), 3), Color.blue);
+			sum += _samples[i] * _samples[i]; // sum squared samples
 		}
-		Debug.Log (maxFreq);
+		RmsValue = Mathf.Sqrt(sum / QSamples); // rms = square root of average
+		DbValue = 20 * Mathf.Log10(RmsValue / RefValue); // calculate dB
+		if (DbValue < -160) DbValue = -160; // clamp it to -160dB min
+		// get sound spectrum
+		// get sound spectrum
+		GetComponent<AudioSource>().GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
+
+		float maxV = 0;
+		var maxN = 0;
+		for (int i = 0; i < QSamples; i++)
+		{ // find max 
+			if (!(_spectrum[i] > maxV) || !(_spectrum[i] > Threshold))
+				continue;
+			maxV = _spectrum[i];
+			maxN = i; // maxN is the index of max
+		}
+		float freqN = maxN; // pass the index to a float variable
+		if (maxN > 0 && maxN < QSamples - 1)
+		{ // interpolate index using neighbours
+			var dL = _spectrum[maxN - 1] / _spectrum[maxN];
+			var dR = _spectrum[maxN + 1] / _spectrum[maxN];
+			freqN += 0.5f * (dR * dR - dL * dL);
+		}
+		PitchValue = freqN * (_fSample / 2) / QSamples; // convert index to frequency
+		if(PitchValue != 0){
+			float maxFreq = 1024f;
+			positionToUse = (7*(PitchValue - 0.5f*maxFreq))/maxFreq;
+		}
+		//Debug.Log ("Main Frequency: "+ positionToUse);
 	}
 }
