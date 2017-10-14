@@ -1,4 +1,4 @@
 sceneSetups:
-- path: C:/Users/foley/Documents/Echo/Assets/Maps/physicsTestingGround.unity
+- path: Assets/Scenes/main.unity
   isLoaded: 1
   isActive: 1
